@@ -1,0 +1,354 @@
+import numpy as np
+import pandas as pd
+from typing import Dict, List, Any
+
+class HealthRiskCalculator:
+    """
+    Health risk calculator using evidence-based algorithms for diabetes, 
+    heart disease, and hypertension risk assessment.
+    """
+    
+    def __init__(self):
+        # Risk factor weights based on medical literature
+        self.diabetes_weights = {
+            'age': 0.15,
+            'bmi': 0.25,
+            'family_history': 0.20,
+            'fasting_glucose': 0.30,
+            'blood_pressure': 0.10
+        }
+        
+        self.heart_disease_weights = {
+            'age': 0.20,
+            'gender': 0.15,
+            'smoking': 0.25,
+            'cholesterol': 0.20,
+            'blood_pressure': 0.20
+        }
+        
+        self.hypertension_weights = {
+            'current_bp': 0.40,
+            'age': 0.15,
+            'bmi': 0.20,
+            'family_history': 0.15,
+            'lifestyle': 0.10
+        }
+    
+    def sigmoid(self, x: float) -> float:
+        """Apply sigmoid function for smooth risk curve"""
+        return 1 / (1 + np.exp(-x))
+    
+    def normalize_feature(self, value: float, min_val: float, max_val: float) -> float:
+        """Normalize feature to 0-1 range"""
+        return (value - min_val) / (max_val - min_val) if max_val > min_val else 0
+    
+    def calculate_diabetes_risk(self, patient_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate diabetes risk based on multiple factors
+        """
+        try:
+            risk_factors = []
+            risk_score = 0.0
+            
+            # Age factor (higher risk with age)
+            age_score = self.normalize_feature(patient_data['age'], 18, 80)
+            if patient_data['age'] >= 45:
+                age_score += 0.2
+                risk_factors.append(f"Age {patient_data['age']} (increased risk after 45)")
+            risk_score += age_score * self.diabetes_weights['age']
+            
+            # BMI factor
+            bmi = patient_data['bmi']
+            if bmi >= 30:
+                bmi_score = 0.8
+                risk_factors.append(f"BMI {bmi:.1f} (obesity - BMI ≥30)")
+            elif bmi >= 25:
+                bmi_score = 0.5
+                risk_factors.append(f"BMI {bmi:.1f} (overweight - BMI 25-29.9)")
+            else:
+                bmi_score = self.normalize_feature(bmi, 18.5, 25)
+            risk_score += bmi_score * self.diabetes_weights['bmi']
+            
+            # Family history
+            if patient_data['family_diabetes']:
+                family_score = 0.7
+                risk_factors.append("Family history of diabetes")
+            else:
+                family_score = 0.1
+            risk_score += family_score * self.diabetes_weights['family_history']
+            
+            # Fasting glucose
+            glucose = patient_data['fasting_glucose']
+            if glucose >= 126:
+                glucose_score = 1.0
+                risk_factors.append(f"Fasting glucose {glucose} mg/dL (diabetic range)")
+            elif glucose >= 100:
+                glucose_score = 0.6
+                risk_factors.append(f"Fasting glucose {glucose} mg/dL (prediabetic range)")
+            else:
+                glucose_score = self.normalize_feature(glucose, 70, 100)
+            risk_score += glucose_score * self.diabetes_weights['fasting_glucose']
+            
+            # Blood pressure factor
+            systolic = patient_data['systolic_bp']
+            if systolic >= 140:
+                bp_score = 0.6
+                risk_factors.append(f"High blood pressure (systolic {systolic} mmHg)")
+            else:
+                bp_score = self.normalize_feature(systolic, 90, 140)
+            risk_score += bp_score * self.diabetes_weights['blood_pressure']
+            
+            # Additional risk factors
+            if patient_data['exercise_days'] < 3:
+                risk_score += 0.05
+                risk_factors.append("Insufficient physical activity (<3 days/week)")
+            
+            if 'Prediabetes' in patient_data['existing_conditions']:
+                risk_score += 0.15
+                risk_factors.append("Existing prediabetes diagnosis")
+            
+            # Apply sigmoid transformation for realistic probability
+            final_score = self.sigmoid(risk_score * 4 - 2)  # Scale and center
+            
+            # Determine risk level
+            if final_score >= 0.7:
+                risk_level = "High"
+            elif final_score >= 0.4:
+                risk_level = "Moderate"
+            else:
+                risk_level = "Low"
+            
+            return {
+                'score': final_score,
+                'risk_level': risk_level,
+                'factors': risk_factors if risk_factors else ["No significant risk factors identified"]
+            }
+            
+        except Exception as e:
+            raise Exception(f"Error calculating diabetes risk: {str(e)}")
+    
+    def calculate_heart_disease_risk(self, patient_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate heart disease risk using Framingham-inspired criteria
+        """
+        try:
+            risk_factors = []
+            risk_score = 0.0
+            
+            # Age and gender factor
+            age = patient_data['age']
+            gender = patient_data['gender']
+            
+            if gender == "Male":
+                if age >= 45:
+                    age_score = 0.7
+                    risk_factors.append(f"Male, age {age} (increased risk after 45)")
+                else:
+                    age_score = self.normalize_feature(age, 18, 45)
+            else:  # Female
+                if age >= 55:
+                    age_score = 0.7
+                    risk_factors.append(f"Female, age {age} (increased risk after 55)")
+                else:
+                    age_score = self.normalize_feature(age, 18, 55)
+            
+            risk_score += age_score * self.heart_disease_weights['age']
+            
+            # Gender factor
+            gender_score = 0.6 if gender == "Male" else 0.3
+            risk_score += gender_score * self.heart_disease_weights['gender']
+            
+            # Smoking factor
+            smoking = patient_data['smoking']
+            if smoking == "Current":
+                smoking_score = 1.0
+                risk_factors.append("Current smoker")
+            elif smoking == "Former":
+                smoking_score = 0.4
+                risk_factors.append("Former smoker")
+            else:
+                smoking_score = 0.1
+            risk_score += smoking_score * self.heart_disease_weights['smoking']
+            
+            # Cholesterol factors
+            total_chol = patient_data['cholesterol']
+            hdl_chol = patient_data['hdl_cholesterol']
+            ldl_ratio = total_chol / hdl_chol if hdl_chol > 0 else 5
+            
+            if total_chol >= 240:
+                chol_score = 0.8
+                risk_factors.append(f"High total cholesterol ({total_chol} mg/dL)")
+            elif total_chol >= 200:
+                chol_score = 0.5
+                risk_factors.append(f"Borderline high cholesterol ({total_chol} mg/dL)")
+            else:
+                chol_score = self.normalize_feature(total_chol, 150, 200)
+            
+            if hdl_chol < 40 and gender == "Male":
+                chol_score += 0.2
+                risk_factors.append(f"Low HDL cholesterol ({hdl_chol} mg/dL) for males")
+            elif hdl_chol < 50 and gender == "Female":
+                chol_score += 0.2
+                risk_factors.append(f"Low HDL cholesterol ({hdl_chol} mg/dL) for females")
+            
+            risk_score += chol_score * self.heart_disease_weights['cholesterol']
+            
+            # Blood pressure factor
+            systolic = patient_data['systolic_bp']
+            diastolic = patient_data['diastolic_bp']
+            
+            if systolic >= 160 or diastolic >= 100:
+                bp_score = 0.9
+                risk_factors.append(f"Stage 2 hypertension ({systolic}/{diastolic} mmHg)")
+            elif systolic >= 140 or diastolic >= 90:
+                bp_score = 0.6
+                risk_factors.append(f"Stage 1 hypertension ({systolic}/{diastolic} mmHg)")
+            elif systolic >= 120 or diastolic >= 80:
+                bp_score = 0.3
+                risk_factors.append(f"Elevated blood pressure ({systolic}/{diastolic} mmHg)")
+            else:
+                bp_score = 0.1
+            
+            risk_score += bp_score * self.heart_disease_weights['blood_pressure']
+            
+            # Additional factors
+            if patient_data['family_heart_disease']:
+                risk_score += 0.1
+                risk_factors.append("Family history of heart disease")
+            
+            if patient_data['bmi'] >= 30:
+                risk_score += 0.05
+                risk_factors.append(f"Obesity (BMI {patient_data['bmi']:.1f})")
+            
+            if patient_data['exercise_days'] < 3:
+                risk_score += 0.05
+                risk_factors.append("Sedentary lifestyle")
+            
+            # Apply sigmoid transformation
+            final_score = self.sigmoid(risk_score * 3 - 1.5)
+            
+            # Determine risk level
+            if final_score >= 0.7:
+                risk_level = "High"
+            elif final_score >= 0.4:
+                risk_level = "Moderate"
+            else:
+                risk_level = "Low"
+            
+            return {
+                'score': final_score,
+                'risk_level': risk_level,
+                'factors': risk_factors if risk_factors else ["No significant risk factors identified"]
+            }
+            
+        except Exception as e:
+            raise Exception(f"Error calculating heart disease risk: {str(e)}")
+    
+    def calculate_hypertension_risk(self, patient_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate hypertension risk based on current BP and other factors
+        """
+        try:
+            risk_factors = []
+            risk_score = 0.0
+            
+            # Current blood pressure (most important factor)
+            systolic = patient_data['systolic_bp']
+            diastolic = patient_data['diastolic_bp']
+            
+            if systolic >= 140 or diastolic >= 90:
+                bp_score = 1.0
+                risk_factors.append(f"Already hypertensive ({systolic}/{diastolic} mmHg)")
+            elif systolic >= 130 or diastolic >= 80:
+                bp_score = 0.7
+                risk_factors.append(f"Stage 1 hypertension ({systolic}/{diastolic} mmHg)")
+            elif systolic >= 120:
+                bp_score = 0.4
+                risk_factors.append(f"Elevated blood pressure ({systolic}/{diastolic} mmHg)")
+            else:
+                bp_score = 0.1
+            
+            risk_score += bp_score * self.hypertension_weights['current_bp']
+            
+            # Age factor
+            age = patient_data['age']
+            if age >= 65:
+                age_score = 0.8
+                risk_factors.append(f"Advanced age ({age} years)")
+            elif age >= 45:
+                age_score = 0.5
+                risk_factors.append(f"Middle age ({age} years)")
+            else:
+                age_score = self.normalize_feature(age, 18, 45)
+            
+            risk_score += age_score * self.hypertension_weights['age']
+            
+            # BMI factor
+            bmi = patient_data['bmi']
+            if bmi >= 30:
+                bmi_score = 0.8
+                risk_factors.append(f"Obesity (BMI {bmi:.1f})")
+            elif bmi >= 25:
+                bmi_score = 0.5
+                risk_factors.append(f"Overweight (BMI {bmi:.1f})")
+            else:
+                bmi_score = self.normalize_feature(bmi, 18.5, 25)
+            
+            risk_score += bmi_score * self.hypertension_weights['bmi']
+            
+            # Family history
+            if patient_data['family_hypertension']:
+                family_score = 0.7
+                risk_factors.append("Family history of hypertension")
+            else:
+                family_score = 0.1
+            
+            risk_score += family_score * self.hypertension_weights['family_history']
+            
+            # Lifestyle factors
+            lifestyle_score = 0.0
+            
+            if patient_data['exercise_days'] < 3:
+                lifestyle_score += 0.3
+                risk_factors.append("Insufficient physical activity")
+            
+            if patient_data['alcohol_consumption'] in ["Heavy"]:
+                lifestyle_score += 0.4
+                risk_factors.append("Heavy alcohol consumption")
+            elif patient_data['alcohol_consumption'] in ["Moderate"]:
+                lifestyle_score += 0.2
+            
+            if patient_data['smoking'] == "Current":
+                lifestyle_score += 0.3
+                risk_factors.append("Current smoking")
+            
+            risk_score += lifestyle_score * self.hypertension_weights['lifestyle']
+            
+            # Additional medical conditions
+            if 'Sleep Apnea' in patient_data['existing_conditions']:
+                risk_score += 0.05
+                risk_factors.append("Sleep apnea")
+            
+            if 'Kidney Disease' in patient_data['existing_conditions']:
+                risk_score += 0.1
+                risk_factors.append("Kidney disease")
+            
+            # Apply sigmoid transformation
+            final_score = self.sigmoid(risk_score * 3 - 1)
+            
+            # Determine risk level
+            if final_score >= 0.7:
+                risk_level = "High"
+            elif final_score >= 0.4:
+                risk_level = "Moderate"
+            else:
+                risk_level = "Low"
+            
+            return {
+                'score': final_score,
+                'risk_level': risk_level,
+                'factors': risk_factors if risk_factors else ["No significant risk factors identified"]
+            }
+            
+        except Exception as e:
+            raise Exception(f"Error calculating hypertension risk: {str(e)}")
