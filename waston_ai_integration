@@ -1,0 +1,296 @@
+import os
+import json
+import requests
+from typing import Dict, List, Any, Optional
+from ibm_watson import NaturalLanguageUnderstandingV1, AssistantV2
+from ibm_watson.natural_language_understanding_v1 import Features, SentimentOptions, EmotionOptions, KeywordsOptions
+from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
+
+class WatsonAIIntegration:
+    """
+    IBM Watson AI integration for enhanced health insights and natural language processing
+    """
+    
+    def __init__(self):
+        self.api_key = os.getenv('IBM_WATSON_API_KEY')
+        self.watson_url = os.getenv('IBM_WATSON_URL')
+        
+        if not self.api_key or not self.watson_url:
+            raise ValueError("IBM Watson credentials not found in environment variables")
+        
+        # Initialize Watson Natural Language Understanding
+        try:
+            authenticator = IAMAuthenticator(self.api_key)
+            self.nlu = NaturalLanguageUnderstandingV1(
+                version='2022-04-07',
+                authenticator=authenticator
+            )
+            self.nlu.set_service_url(self.watson_url)
+        except Exception as e:
+            print(f"Warning: Could not initialize Watson NLU: {e}")
+            self.nlu = None
+    
+    def analyze_health_text(self, text: str) -> Dict[str, Any]:
+        """
+        Analyze health-related text for sentiment, emotions, and key health concepts
+        """
+        if not self.nlu or not text.strip():
+            return {
+                'sentiment': {'score': 0, 'label': 'neutral'},
+                'emotions': {},
+                'keywords': [],
+                'health_concepts': []
+            }
+        
+        try:
+            response = self.nlu.analyze(
+                text=text,
+                features=Features(
+                    sentiment=SentimentOptions(),
+                    emotion=EmotionOptions(),
+                    keywords=KeywordsOptions(limit=10)
+                )
+            ).get_result()
+            
+            # Extract health-related keywords and concepts
+            health_keywords = []
+            keywords_data = response.get('keywords', [])
+            if keywords_data:
+                health_terms = ['health', 'medical', 'symptom', 'pain', 'wellness', 
+                              'exercise', 'diet', 'stress', 'sleep', 'medication',
+                              'diabetes', 'heart', 'blood', 'pressure', 'cholesterol']
+                
+                for keyword in keywords_data:
+                    if isinstance(keyword, dict):
+                        keyword_text = keyword.get('text', '').lower()
+                        if any(term in keyword_text for term in health_terms):
+                            health_keywords.append({
+                                'text': keyword.get('text'),
+                                'relevance': keyword.get('relevance', 0)
+                            })
+            
+            return {
+                'sentiment': response.get('sentiment', {}).get('document', {}),
+                'emotions': response.get('emotion', {}).get('document', {}).get('emotion', {}),
+                'keywords': response.get('keywords', [])[:5],  # Top 5 keywords
+                'health_concepts': health_keywords
+            }
+            
+        except Exception as e:
+            print(f"Error analyzing text with Watson: {e}")
+            return {
+                'sentiment': {'score': 0, 'label': 'neutral'},
+                'emotions': {},
+                'keywords': [],
+                'health_concepts': []
+            }
+    
+    def generate_personalized_insights(self, patient_data: Dict[str, Any], risks: Dict[str, Any]) -> List[str]:
+        """
+        Generate AI-powered personalized health insights based on patient data and risk assessment
+        """
+        insights = []
+        
+        # Analyze risk patterns
+        risk_scores = [risks[condition]['score'] for condition in risks]
+        avg_risk = sum(risk_scores) / len(risk_scores)
+        max_risk_condition = max(risks.keys(), key=lambda x: risks[x]['score'])
+        
+        # Generate insights based on risk analysis
+        if avg_risk >= 0.6:
+            insights.append("🔴 Your overall health profile indicates elevated risk across multiple conditions. Comprehensive lifestyle changes and medical supervision are strongly recommended.")
+        elif avg_risk >= 0.4:
+            insights.append("🟡 Your health profile shows moderate risk factors. Proactive lifestyle modifications can significantly improve your health outcomes.")
+        else:
+            insights.append("🟢 Your current health profile shows relatively low risk. Continue maintaining your healthy lifestyle habits.")
+        
+        # Condition-specific insights
+        if risks[max_risk_condition]['score'] >= 0.7:
+            condition_name = max_risk_condition.replace('_', ' ')
+            insights.append(f"⚠️ Your highest risk area is {condition_name}. Focus your immediate attention on the specific recommendations for this condition.")
+        
+        # BMI-based insights
+        bmi = patient_data.get('bmi', 25)
+        if bmi >= 30:
+            insights.append("💪 Weight management is a key priority. A 5-10% weight reduction can significantly lower your risk across all assessed conditions.")
+        elif bmi >= 25:
+            insights.append("⚖️ Achieving a healthy weight range could help optimize your health outcomes and reduce future risk.")
+        
+        # Age-based insights
+        age = patient_data.get('age', 35)
+        if age >= 60:
+            insights.append("🕰️ As we age, preventive care becomes increasingly important. Regular monitoring and early intervention are your best strategies.")
+        elif age >= 45:
+            insights.append("📈 You're entering a crucial age range for health maintenance. The choices you make now will significantly impact your future health.")
+        
+        # Lifestyle insights
+        exercise_days = patient_data.get('exercise_days', 0)
+        if exercise_days < 3:
+            insights.append("🏃‍♂️ Increasing physical activity is one of the most powerful interventions you can make. Even moderate exercise provides substantial health benefits.")
+        
+        smoking = patient_data.get('smoking', 'Never')
+        if smoking == 'Current':
+            insights.append("🚭 Smoking cessation is the single most important step you can take to improve your health immediately and dramatically reduce future risks.")
+        
+        return insights
+    
+    def analyze_symptoms_text(self, symptoms_text: str) -> Dict[str, Any]:
+        """
+        Analyze patient-reported symptoms or health concerns using natural language processing
+        """
+        if not symptoms_text.strip():
+            return {
+                'urgency_level': 'low',
+                'key_symptoms': [],
+                'recommendations': [],
+                'medical_attention_needed': False
+            }
+        
+        analysis = self.analyze_health_text(symptoms_text)
+        
+        # Define urgency keywords
+        high_urgency_terms = ['chest pain', 'severe', 'emergency', 'urgent', 'acute', 'sudden', 'intense']
+        moderate_urgency_terms = ['pain', 'discomfort', 'concern', 'worried', 'problem', 'issue']
+        
+        text_lower = symptoms_text.lower()
+        
+        # Determine urgency level
+        urgency_level = 'low'
+        if any(term in text_lower for term in high_urgency_terms):
+            urgency_level = 'high'
+        elif any(term in text_lower for term in moderate_urgency_terms):
+            urgency_level = 'moderate'
+        
+        # Extract key symptoms from keywords
+        key_symptoms = [kw['text'] for kw in analysis.get('health_concepts', [])]
+        
+        # Generate recommendations based on analysis
+        recommendations = []
+        if urgency_level == 'high':
+            recommendations.append("Seek immediate medical attention")
+            recommendations.append("Contact emergency services if symptoms are severe")
+        elif urgency_level == 'moderate':
+            recommendations.append("Schedule an appointment with your healthcare provider")
+            recommendations.append("Monitor symptoms and note any changes")
+        else:
+            recommendations.append("Continue monitoring and maintain healthy lifestyle")
+            recommendations.append("Discuss with healthcare provider at next visit")
+        
+        return {
+            'urgency_level': urgency_level,
+            'key_symptoms': key_symptoms,
+            'recommendations': recommendations,
+            'medical_attention_needed': urgency_level in ['high', 'moderate'],
+            'sentiment_analysis': analysis.get('sentiment', {}),
+            'emotions': analysis.get('emotions', {})
+        }
+    
+    def enhance_care_plan_with_ai(self, care_plan: Dict[str, Any], patient_data: Dict[str, Any], risks: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Enhance the care plan with AI-generated insights and recommendations
+        """
+        enhanced_plan = care_plan.copy()
+        
+        # Add AI insights section
+        enhanced_plan['ai_insights'] = self.generate_personalized_insights(patient_data, risks)
+        
+        # Add prioritized recommendations based on risk analysis
+        priority_recommendations = []
+        
+        # Identify the highest risk condition
+        max_risk_condition = max(risks.keys(), key=lambda x: risks[x]['score'])
+        max_risk_score = risks[max_risk_condition]['score']
+        
+        if max_risk_score >= 0.8:
+            priority_recommendations.append(f"HIGHEST PRIORITY: Address {max_risk_condition.replace('_', ' ')} risk factors immediately")
+        
+        # Add modifiable risk factors
+        modifiable_risks = []
+        if patient_data.get('bmi', 25) >= 25:
+            modifiable_risks.append("Weight management")
+        if patient_data.get('exercise_days', 0) < 3:
+            modifiable_risks.append("Increase physical activity")
+        if patient_data.get('smoking') == 'Current':
+            modifiable_risks.append("Smoking cessation")
+        
+        if modifiable_risks:
+            priority_recommendations.append(f"Focus on modifiable risk factors: {', '.join(modifiable_risks)}")
+        
+        enhanced_plan['priority_recommendations'] = priority_recommendations
+        
+        # Add motivation and behavioral insights
+        motivational_tips = [
+            "Set small, achievable goals to build momentum",
+            "Track your progress to stay motivated",
+            "Find an accountability partner or support group",
+            "Celebrate small victories along your health journey",
+            "Remember that small changes compound over time"
+        ]
+        
+        enhanced_plan['motivational_tips'] = motivational_tips
+        
+        return enhanced_plan
+    
+    def get_health_education_content(self, condition: str) -> Dict[str, Any]:
+        """
+        Generate educational content about specific health conditions
+        """
+        education_content = {
+            'diabetes': {
+                'overview': 'Diabetes is a group of metabolic disorders characterized by high blood sugar levels.',
+                'prevention_tips': [
+                    'Maintain a healthy weight',
+                    'Stay physically active',
+                    'Eat a balanced diet rich in fiber',
+                    'Limit processed foods and added sugars',
+                    'Get regular health screenings'
+                ],
+                'warning_signs': [
+                    'Frequent urination',
+                    'Excessive thirst',
+                    'Unexplained weight loss',
+                    'Fatigue',
+                    'Blurred vision'
+                ]
+            },
+            'heart_disease': {
+                'overview': 'Heart disease refers to several conditions that affect the heart and blood vessels.',
+                'prevention_tips': [
+                    'Follow a heart-healthy diet',
+                    'Exercise regularly',
+                    'Maintain healthy cholesterol levels',
+                    'Manage blood pressure',
+                    'Avoid smoking and limit alcohol'
+                ],
+                'warning_signs': [
+                    'Chest pain or discomfort',
+                    'Shortness of breath',
+                    'Fatigue',
+                    'Irregular heartbeat',
+                    'Swelling in legs or feet'
+                ]
+            },
+            'hypertension': {
+                'overview': 'Hypertension (high blood pressure) is a condition where blood pressure is consistently elevated.',
+                'prevention_tips': [
+                    'Reduce sodium intake',
+                    'Maintain healthy weight',
+                    'Exercise regularly',
+                    'Limit alcohol consumption',
+                    'Manage stress effectively'
+                ],
+                'warning_signs': [
+                    'Often no symptoms (silent killer)',
+                    'Severe headaches',
+                    'Chest pain',
+                    'Difficulty breathing',
+                    'Vision problems'
+                ]
+            }
+        }
+        
+        return education_content.get(condition, {
+            'overview': 'General health information available upon request.',
+            'prevention_tips': ['Maintain a healthy lifestyle', 'Regular medical checkups'],
+            'warning_signs': ['Consult healthcare provider for specific symptoms']
+        })
